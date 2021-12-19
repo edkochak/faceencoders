@@ -6,4 +6,5 @@
 /2
 /runs
 /*.mp4
-/*.model
+/models/*.model
+/utils.py

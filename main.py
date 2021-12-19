@@ -5,8 +5,9 @@ import torch
 import cv2
 import numpy as np
 from PIL import Image
+import models
 import os
-import test as t
+import train as t
 import torchvision.transforms as T
 import torchvision
 from torch.utils.data import Dataset
@@ -14,11 +15,28 @@ import matplotlib.pyplot as plt
 import random
 from torch.utils.tensorboard import SummaryWriter
 import scipy.spatial.distance as distance
+import mediapipe as mp
 def rand(): return random.randint(100, 255)
 
 
+mp_selfie_segmentation = mp.solutions.selfie_segmentation
+selfie_segmentation = mp_selfie_segmentation.SelfieSegmentation(
+            model_selection=1)
+
+def remove_bg(frame):
+    frame = np.array(frame)
+    height, width, channel = frame.shape
+    RGB = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = selfie_segmentation.process(RGB)
+    mask = results.segmentation_mask
+    condition = np.stack(
+        (results.segmentation_mask,) * 3, axis=-1) > 0.8
+    output_image = np.where(condition, frame, frame*0)
+    img = Image.fromarray(output_image.copy())
+    return img
+
 def get_net(path):
-    model = t.Net()
+    model = models.Net_18()
     model.pretrain(embad=50)
     model.load_state_dict(torch.load(path))
     return model
@@ -27,13 +45,14 @@ def get_net(path):
 def main(path_to_net, filename_capture, record=False, two_cascades=False):
     transform = T.Compose([
         T.Resize([60, 60]),
-        T.ToTensor()
+        T.ToTensor(),
+
     ])
     tb = SummaryWriter()
     last = []
     lastimage = []
     countclass = []
-    threshold = 0.3
+    threshold = 0.2
     face_cascade = cv2.CascadeClassifier(
         cv2.data.haarcascades + 'haarcascade_frontalface_alt_tree.xml')
     if two_cascades:
@@ -63,6 +82,10 @@ def main(path_to_net, filename_capture, record=False, two_cascades=False):
     while True:
         ret, original_image = cap.read()
         count += 1
+        # if count%2==0:
+        #     cv2.imshow("camera", original_image)
+        #     if cv2.waitKey(1) == 27:
+        #         break
 
         h1, w1, _ = original_image.shape
         grayscale_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2GRAY)
@@ -84,6 +107,7 @@ def main(path_to_net, filename_capture, record=False, two_cascades=False):
                 face_image = original_image[max(row-dy, 0):min(row +
                                                                height+dy, h1), max(column-dx, 0):min(column+width+dx, w1), ::-1]
                 img = Image.fromarray(face_image)
+                img = remove_bg(img)
 
                 img = transform(img)
                 img_faces.append(img)
@@ -120,7 +144,7 @@ def main(path_to_net, filename_capture, record=False, two_cascades=False):
                 for id, w in sum_res:
                     if id not in voices:
                         voices[id] = 0
-                    voices[id] += np.e**(-w**2)
+                    voices[id] += np.e**(-(w**2))
 
                 # if sum_res:
                 #     print(sum_res[0][1])
@@ -140,6 +164,7 @@ def main(path_to_net, filename_capture, record=False, two_cascades=False):
                     maxkey = len(lastimage)-1
 
                 else:
+                    (column, row, width, height) = detected_faces[n]
                     maxkey = max(voices, key=lambda x: voices[x])
                     face_image, color = lastimage[maxkey]
 
@@ -184,4 +209,4 @@ def main(path_to_net, filename_capture, record=False, two_cascades=False):
 
 if __name__ == '__main__':
     # test()
-    main()
+    main('best.model','videoplayback.mp4')
